@@ -60,7 +60,7 @@ class MainActivity : AppCompatActivity() {
 
         if (isOfflineMode) {
             setOfflineValues()
-        }
+        } else Toast.makeText(this@MainActivity,"Please search to proceed",Toast.LENGTH_SHORT).show()
 
 
 
