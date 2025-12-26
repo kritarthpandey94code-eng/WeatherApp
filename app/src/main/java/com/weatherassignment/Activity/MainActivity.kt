@@ -37,6 +37,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var viewModel: WeatherViewModel
     private lateinit var database: WeatherDatabase
     private lateinit var weatherDao: WeatherDao
+    private var isOfflineMode = false
 
 
     @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
@@ -55,24 +56,28 @@ class MainActivity : AppCompatActivity() {
         // Default city
 //        viewModel.fetchWeather("Munich")
 
+        isOfflineMode = !isNetworkAvailable(this)
+
+        if (isOfflineMode) {
+            setOfflineValues()
+        }
+
+
+
         binding.btnRefresh.setOnClickListener {
             val city = binding
                 .searchView.query.toString()
             if (city.isNotEmpty()) {
                 viewModel.fetchWeather(city)
-            }
-            else Toast.makeText(this@MainActivity,"Please provide city",Toast.LENGTH_SHORT).show()
+            } else Toast.makeText(this@MainActivity, "Please provide city", Toast.LENGTH_SHORT)
+                .show()
         }
 
         binding.searchView.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
             override fun onQueryTextSubmit(query: String?): Boolean {
                 query?.let { city ->
-                    if(isNetworkAvailable(this@MainActivity)) {
-                        if (city.isNotBlank()) viewModel.fetchWeather(city)
-                        binding.searchView.clearFocus()
-                    } else{
-                        Toast.makeText(this@MainActivity,"No active connection, One search is required",Toast.LENGTH_SHORT).show()
-                    }
+                    if (city.isNotBlank()) viewModel.fetchWeather(city)
+                    binding.searchView.clearFocus()
                 }
                 return true
             }
@@ -96,6 +101,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showWeather(data: ParentResponse) {
+        weatherDao.getLocation().removeObservers(this)
+        weatherDao.getCurrentWeather().removeObservers(this)
+        weatherDao.getForecastDays().removeObservers(this)
+
+        isOfflineMode = false
+        val scope = CoroutineScope(Dispatchers.IO)
+        scope.launch { saveWeather(data, weatherDao) }
         binding.tvCity.text = data.location!!.name
         binding.tvFeelsLike.text = data.forecast!!.forecastday.get(0).date.toString()
         binding.tvCountry.text = data.location!!.country
@@ -149,10 +161,6 @@ class MainActivity : AppCompatActivity() {
             .load("https:${data.current!!.condition!!.icon}")
             .into(binding.imgWeather)
 
-        val scope = CoroutineScope(Dispatchers.IO)
-        scope.launch() {
-            saveWeather(data, weatherDao)
-        }
         weatherDao.getLocation().observe(this) { location ->
             location?.let {
                 Log.d("ROOM_READ", "Location: ${it.name}, ${it.country}")
@@ -178,7 +186,8 @@ class MainActivity : AppCompatActivity() {
         dao.clearHourly()
         dao.clearForecast()
         dao.clearCurrent()
-
+        dao.clearLocation()
+        Log.d("ddddd", "Ddddddddd")
         // Location
         api.location?.let {
             LocationEntity(
@@ -228,11 +237,11 @@ class MainActivity : AppCompatActivity() {
                     maxtempC = day.day!!.maxtempC!!.toDouble(),
                     locationName = ""
                 )
-            ).toInt()
+            )
 
             val hours = day.hour.map {
                 HourlyWeatherEntity(
-                    forecastDayId = dayId,
+                    forecastDayId = 0,
                     time = it.time!!.toString(),
                     tempC = it.tempC!!.toDouble(),
                     isDay = it.isDay!!.toInt(),
@@ -254,109 +263,128 @@ class MainActivity : AppCompatActivity() {
             context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val network = connectivityManager.activeNetwork ?: return false
         val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
-        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
-                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
-                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
-    override fun onStart() {
-        super.onStart()
-        setOfflineValues()
-    }
 
-    private fun setOfflineValues(){
-        if (!isNetworkAvailable(this)) {
-            Toast.makeText(this, "No internet connection", Toast.LENGTH_LONG).show()
-
-            val data: LiveData<List<ForecastDayEntity>> = weatherDao.getForecastDays()
-            val LocationData: LiveData<LocationEntity> = weatherDao.getLocation()
-            val CurrentData: LiveData<CurrentWeatherEntity> = weatherDao.getCurrentWeather()
+    private fun setOfflineValues() {
+        val data: LiveData<List<ForecastDayEntity>> = weatherDao.getForecastDays()
+        val LocationData: LiveData<LocationEntity?> = weatherDao.getLocation()
+        val CurrentData: LiveData<CurrentWeatherEntity?> = weatherDao.getCurrentWeather()
 
 
-            LocationData.observe(this, Observer {
-                if (!it.name.isNullOrEmpty() && !it.country.isNullOrEmpty()){
-                    binding.tvCity.text = it.name
-                    binding.tvCountry.text = it.country
-                } else{
-                    Toast.makeText(this,"Location not available, Search once",Toast.LENGTH_LONG).show()
-                }
-            })
-
-            CurrentData.observe(this, Observer {
-                if (!it.tempC.toString().isNullOrEmpty() && !it.conditionText.isNullOrEmpty() && !it.windKph.toString().isNullOrEmpty()
-                    && !it.uv.toString().isNullOrEmpty() && !it.humidity.toString().isNullOrEmpty()&&
-                    !it.pressureMb.toString().isNullOrEmpty()) {
-                    binding.tvTemp.text = "${it.tempC}°C"
-                    binding.tvCondition.text = it.conditionText
-                    binding.stat1.tvValue.text = it.windKph.toString()
-                    binding.stat1.tvLabel.text = "Wind Speed"
-                    binding.stat2.tvLabel.text = "UV"
-                    binding.stat2.tvValue.text = it.uv.toString()
-                    binding.stat3.tvLabel.text = "Humidity"
-                    binding.stat3.tvValue.text = it.humidity.toString()
-                    binding.stat4.tvLabel.text = "Air Pressure"
-                    binding.stat4.tvValue.text = it.pressureMb.toString()
-                } else Toast.makeText(this,"Details not available, Search once",Toast.LENGTH_SHORT).show()
-            })
-
-            data.observe(this, Observer { list ->
-                if (!list.isNullOrEmpty()) {
-                    if (list.size>1){
-                        if (!list[0].date.isNullOrEmpty()){
-                            binding.tvFeelsLike.text = list[0].date.toString()
-
-                        }
-                    }
-                    if (list.size > 2) {
-                        if (!list[2].date.isNullOrEmpty() && !list[2].avgTempC.toString().isNullOrEmpty()) {
-                            binding.tvDay1.text = list[2].date
-                            binding.tvTempDay1.text = "${list[2].avgTempC}°C"
-                            val nextdayIcon = list[2].conditionIcon
-                            Glide.with(this)
-                                .load("https:${nextdayIcon}")
-                                .into(binding.imgDay1)
-
-                        } else {
-                            Toast.makeText(this,"Details not available, Search once",Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                    if (list.size > 3) {
-                        if (!list[3].date.isNullOrEmpty() && !list[3].avgTempC.toString().isNullOrEmpty()) {
-                            binding.tvDay2.text = list[3].date
-                            binding.tvTempDay2.text = "${list[3].avgTempC}°C"
-                            val nextdayIcon = list[3].conditionIcon
-                            Glide.with(this)
-                                .load("https:${nextdayIcon}")
-                                .into(binding.imgDay2)
-                        }else {
-                            Toast.makeText(this,"Details not available, Search once",Toast.LENGTH_SHORT).show()
-
-                        }
-                    }
-                    if (list.size > 4) {
-
-                        if (!list[4].date.isNullOrEmpty() && !list[4].avgTempC.toString().isNullOrEmpty()) {
-                            binding.tvDay3.text = list[4].date
-                            binding.tvTempDay3.text = "${list[4].avgTempC}°C"
-
-                            val nextdayIcon = list[4].conditionIcon
-                            Glide.with(this)
-                                .load("https:${nextdayIcon}")
-                                .into(binding.imgDay3)
-                        }else{
-                            Toast.makeText(this,"Details not available, Search once",Toast.LENGTH_SHORT).show()
-
-                        }
-                    }
-
-                } else {
-                    Toast.makeText(this, "Some data not available", Toast.LENGTH_SHORT).show()
-                }
-            })
+        LocationData.removeObservers(this)
+        CurrentData.removeObservers(this)
+        data.removeObservers(this)
 
 
-
+        LocationData.observe(this) { it ->
+            if (it != null && !it.name.isNullOrEmpty() && !it.country.isNullOrEmpty()) {
+                Log.d("cccccc", it.name)
+                binding.tvCity.text = it.name
+                binding.tvCountry.text = it.country
+            } else {
+                Toast.makeText(this, "Location not available, Search once", Toast.LENGTH_LONG)
+                    .show()
+            }
         }
+
+        CurrentData.observe(this) { it ->
+            if (it != null && !it.tempC.toString()
+                    .isNullOrEmpty() && !it.conditionText.isNullOrEmpty() && !it.windKph.toString()
+                    .isNullOrEmpty()
+                && !it.uv.toString().isNullOrEmpty() && !it.humidity.toString().isNullOrEmpty() &&
+                !it.pressureMb.toString().isNullOrEmpty()
+            ) {
+                binding.tvTemp.text = "${it.tempC}°C"
+                binding.tvCondition.text = it.conditionText
+                binding.stat1.tvValue.text = it.windKph.toString()
+                binding.stat1.tvLabel.text = "Wind Speed"
+                binding.stat2.tvLabel.text = "UV"
+                binding.stat2.tvValue.text = it.uv.toString()
+                binding.stat3.tvLabel.text = "Humidity"
+                binding.stat3.tvValue.text = it.humidity.toString()
+                binding.stat4.tvLabel.text = "Air Pressure"
+                binding.stat4.tvValue.text = it.pressureMb.toString()
+            } else Toast.makeText(this, "Details not available, Search once", Toast.LENGTH_SHORT)
+                .show()
+        }
+
+        data.observe(this) { list ->
+            if (!list.isNullOrEmpty()) {
+                if (list.size > 1) {
+                    if (!list[0].date.isNullOrEmpty()) {
+                        binding.tvFeelsLike.text = list[0].date.toString()
+
+                    }
+                }
+                if (list.size > 2) {
+                    if (!list[2].date.isNullOrEmpty() && !list[2].avgTempC.toString()
+                            .isNullOrEmpty()
+                    ) {
+                        binding.tvDay1.text = list[2].date
+                        binding.tvTempDay1.text = "${list[2].avgTempC}°C"
+                        val nextdayIcon = list[2].conditionIcon
+                        Glide.with(this)
+                            .load("https:${nextdayIcon}")
+                            .into(binding.imgDay1)
+
+                    } else {
+                        Toast.makeText(
+                            this,
+                            "Details not available, Search once",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+                if (list.size > 3) {
+                    if (!list[3].date.isNullOrEmpty() && !list[3].avgTempC.toString()
+                            .isNullOrEmpty()
+                    ) {
+                        binding.tvDay2.text = list[3].date
+                        binding.tvTempDay2.text = "${list[3].avgTempC}°C"
+                        val nextdayIcon = list[3].conditionIcon
+                        Glide.with(this)
+                            .load("https:${nextdayIcon}")
+                            .into(binding.imgDay2)
+                    } else {
+                        Toast.makeText(
+                            this,
+                            "Details not available, Search once",
+                            Toast.LENGTH_SHORT
+                        ).show()
+
+                    }
+                }
+                if (list.size > 4) {
+
+                    if (!list[4].date.isNullOrEmpty() && !list[4].avgTempC.toString()
+                            .isNullOrEmpty()
+                    ) {
+                        binding.tvDay3.text = list[4].date
+                        binding.tvTempDay3.text = "${list[4].avgTempC}°C"
+
+                        val nextdayIcon = list[4].conditionIcon
+                        Glide.with(this)
+                            .load("https:${nextdayIcon}")
+                            .into(binding.imgDay3)
+                    } else {
+                        Toast.makeText(
+                            this,
+                            "Details not available, Search once",
+                            Toast.LENGTH_SHORT
+                        ).show()
+
+                    }
+                }
+
+
+            } else {
+                Toast.makeText(this, "Some data not available", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+
     }
 }
 
