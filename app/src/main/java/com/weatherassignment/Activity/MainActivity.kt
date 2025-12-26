@@ -56,6 +56,7 @@ class MainActivity : AppCompatActivity() {
         // Default city
 //        viewModel.fetchWeather("Munich")
 
+
         isOfflineMode = !isNetworkAvailable(this)
 
         if (isOfflineMode) {
@@ -187,7 +188,6 @@ class MainActivity : AppCompatActivity() {
         dao.clearForecast()
         dao.clearCurrent()
         dao.clearLocation()
-        Log.d("ddddd", "Ddddddddd")
         // Location
         api.location?.let {
             LocationEntity(
@@ -386,6 +386,12 @@ class MainActivity : AppCompatActivity() {
 
 
     }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        isOfflineMode= false
+    }
+
 }
 
 //push check
