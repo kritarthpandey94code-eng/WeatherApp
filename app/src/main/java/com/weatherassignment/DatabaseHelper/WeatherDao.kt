@@ -9,44 +9,49 @@ import androidx.room.Query
 @Dao
 interface WeatherDao {
 
+    // ------------------ INSERT ------------------
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertLocation(location: LocationEntity)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCurrentWeather(current: CurrentWeatherEntity)
 
-    @Insert
-    suspend fun insertForecastDay(day: ForecastDayEntity): Long
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertForecastDay(day: ForecastDayEntity)
 
-    @Insert
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertHourlyWeather(list: List<HourlyWeatherEntity>)
 
-    @Query("DELETE FROM hourly_weather")
-    suspend fun clearHourly()
 
-    @Query("DELETE FROM forecast_day")
-    suspend fun clearForecast()
+    // ------------------ CLEAR ------------------
 
-    @Query("DELETE FROM current_weather")
+    @Query("DELETE FROM LOCATION")
+    suspend fun clearLocation()
+
+    @Query("DELETE FROM CURRENT_WEATHER")
     suspend fun clearCurrent()
 
-    // Location
+    @Query("DELETE FROM FORECAST_DAY")
+    suspend fun clearForecast()
+
+    @Query("DELETE FROM HOURLY_WEATHER")
+    suspend fun clearHourly()
+
+
+    // ------------------ READ ------------------
+
     @Query("SELECT * FROM LOCATION LIMIT 1")
-    fun getLocation(): LiveData<LocationEntity>
+    fun getLocation(): LiveData<LocationEntity?>
 
-    // Current Weather
     @Query("SELECT * FROM CURRENT_WEATHER LIMIT 1")
-    fun getCurrentWeather(): LiveData<CurrentWeatherEntity>
+    fun getCurrentWeather(): LiveData<CurrentWeatherEntity?>
 
-    // Forecast Days
-    @Query("SELECT * FROM FORECAST_DAY")
+    @Query("SELECT * FROM FORECAST_DAY ORDER BY date ASC")
     fun getForecastDays(): LiveData<List<ForecastDayEntity>>
 
-    // Hourly Weather
-    @Query("SELECT * FROM HOURLY_WEATHER WHERE forecastDayId = :dayId")
+    @Query("SELECT * FROM HOURLY_WEATHER WHERE forecastDayId = :dayId ORDER BY time ASC")
     fun getHourlyWeather(dayId: Int): LiveData<List<HourlyWeatherEntity>>
-
-
-
 }
+
 
